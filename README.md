@@ -17,9 +17,11 @@
 
 ## 快速开始
 
-### 方式一：直接使用 exe（推荐）
+### 方式一：直接使用（推荐）
 
-从 [Releases](../../releases) 下载最新版 `夸克网盘签到助手.exe`，双击运行即可。
+从 [Releases](../../releases) 下载最新版 `QuarkCheckIn.zip`，解压到任意文件夹，双击 `QuarkCheckIn.exe` 运行即可。
+
+> 首次运行会在 exe 同目录下生成 `users.json`、`sign_records.json`、`settings.json` 三个数据文件，请勿删除。
 
 ### 方式二：从源码运行
 
@@ -35,7 +37,7 @@ python checkIn_Quark.py
 
 ```bash
 pip install -r requirements.txt
-pyinstaller --onefile --windowed --name "夸克网盘签到助手" --icon "skikm-g8mg7-001.ico" checkIn_Quark.py
+pyinstaller --onefile --windowed --name "QuarkCheckIn" --icon "icon.ico" --add-data "icon.ico;." checkIn_Quark.py
 ```
 
 ## 抓包获取签到 URL
@@ -62,7 +64,7 @@ pyinstaller --onefile --windowed --name "夸克网盘签到助手" --icon "skikm
 ```
 checkIn_Quark/
 ├── checkIn_Quark.py          # 主程序
-├── skikm-g8mg7-001.ico       # 程序图标
+├── icon.ico                  # 程序图标
 ├── requirements.txt          # Python 依赖
 ├── .gitignore                # Git 忽略规则
 └── README.md                 # 项目说明

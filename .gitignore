@@ -2,6 +2,7 @@ __pycache__/
 *.pyc
 *.pyo
 *.exe
+*.zip
 *.spec
 build/
 dist/

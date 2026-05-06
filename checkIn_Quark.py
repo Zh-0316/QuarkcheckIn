@@ -46,12 +46,16 @@ from PyQt6.QtWidgets import (
 APP_NAME = "QuarkAutoCheckIn"
 if getattr(sys, 'frozen', False):
     DATA_DIR = os.path.dirname(sys.executable)
+    BUNDLE_DIR = sys._MEIPASS
 else:
     DATA_DIR = os.path.dirname(os.path.abspath(__file__))
+    BUNDLE_DIR = DATA_DIR
 USERS_FILE = os.path.join(DATA_DIR, "users.json")
 RECORDS_FILE = os.path.join(DATA_DIR, "sign_records.json")
 SETTINGS_FILE = os.path.join(DATA_DIR, "settings.json")
+ICON_PATH = os.path.join(BUNDLE_DIR, "icon.ico")
 REGISTRY_PATH = r"Software\Microsoft\Windows\CurrentVersion\Run"
+REGISTRY_KEY = APP_NAME
 
 
 def extract_params(url):
@@ -235,6 +239,7 @@ class Quark:
 
     def do_sign(self):
         log = ""
+        brief = ""
         growth_info = self.get_growth_info()
         if growth_info:
             log += (
@@ -257,6 +262,11 @@ class Quark:
                         f"📊 当前总容量：{self.convert_bytes(updated_growth_info['total_capacity'])}，"
                         f"签到累计容量：{self.convert_bytes(updated_growth_info['cap_composition'].get('sign_reward', 0))}\n"
                     )
+                    sign_reward = growth_info['cap_sign']['sign_daily_reward']
+                    total_sign = updated_growth_info['cap_composition'].get('sign_reward', 0)
+                    total_cap = updated_growth_info['total_capacity']
+                    progress = f"{growth_info['cap_sign']['sign_progress']}/{growth_info['cap_sign']['sign_target']}"
+                    brief = f"今日+{self.convert_bytes(sign_reward)}\n累计+{self.convert_bytes(total_sign)}  总空间{self.convert_bytes(total_cap)}  连签{progress}"
             else:
                 sign, sign_return = self.get_growth_sign()
                 if sign:
@@ -270,16 +280,22 @@ class Quark:
                             f"📊 当前总容量：{self.convert_bytes(updated_growth_info['total_capacity'])}，"
                             f"签到累计容量：{self.convert_bytes(updated_growth_info['cap_composition'].get('sign_reward', 0))}\n"
                         )
+                        total_sign = updated_growth_info['cap_composition'].get('sign_reward', 0)
+                        total_cap = updated_growth_info['total_capacity']
+                        progress = f"{growth_info['cap_sign']['sign_progress'] + 1}/{growth_info['cap_sign']['sign_target']}"
+                        brief = f"今日+{self.convert_bytes(sign_return)}\n累计+{self.convert_bytes(total_sign)}  总空间{self.convert_bytes(total_cap)}  连签{progress}"
                 else:
                     log += f"❌ 签到异常: {sign_return}\n"
+                    brief = f"❌ {sign_return}"
         else:
             log += "❌ 签到异常: 获取成长信息失败\n"
+            brief = "❌ 获取成长信息失败"
 
-        return log
+        return log, brief
 
 
 class SignWorker(QThread):
-    finished = pyqtSignal(str, str, bool)
+    finished = pyqtSignal(str, str, str, bool)
 
     def __init__(self, user, data_manager):
         super().__init__()
@@ -291,7 +307,7 @@ class SignWorker(QThread):
         nickname = self.user["nickname"]
 
         if self.data_manager.is_signed_today(user_id):
-            self.finished.emit(user_id, f"✅ {nickname} 今日已签到，跳过", True)
+            self.finished.emit(user_id, f"✅ {nickname} 今日已签到", "", True)
             return
 
         url = self.user["url"]
@@ -301,15 +317,15 @@ class SignWorker(QThread):
 
         try:
             quark = Quark(user_data)
-            log = quark.do_sign()
+            log, brief = quark.do_sign()
             self.data_manager.mark_signed(user_id)
-            self.finished.emit(user_id, f"🙍🏻‍♂️ {nickname}\n{log}", True)
+            self.finished.emit(user_id, f"🙍🏻‍♂️{nickname}  {brief}", log, True)
         except Exception as e:
-            self.finished.emit(user_id, f"❌ {nickname} 签到失败: {str(e)}", False)
+            self.finished.emit(user_id, f"❌{nickname} 签到失败", str(e), False)
 
 
 class BatchSignWorker(QThread):
-    single_finished = pyqtSignal(str, str, bool)
+    single_finished = pyqtSignal(str, str, str, bool)
     all_finished = pyqtSignal(str)
 
     def __init__(self, users, data_manager):
@@ -324,8 +340,8 @@ class BatchSignWorker(QThread):
             nickname = user["nickname"]
 
             if self.data_manager.is_signed_today(user_id):
-                self.single_finished.emit(user_id, f"✅ {nickname} 今日已签到，跳过", True)
-                results.append(f"✅ {nickname}: 今日已签到")
+                self.single_finished.emit(user_id, f"✅{nickname} 今日已签到", "", True)
+                results.append(f"✅{nickname} 今日已签到")
                 continue
 
             url = user["url"]
@@ -335,15 +351,15 @@ class BatchSignWorker(QThread):
 
             try:
                 quark = Quark(user_data)
-                log = quark.do_sign()
+                log, brief = quark.do_sign()
                 self.data_manager.mark_signed(user_id)
-                self.single_finished.emit(user_id, f"🙍🏻‍♂️ {nickname}\n{log}", True)
-                results.append(f"🙍🏻‍♂️ {nickname}\n{log}")
+                self.single_finished.emit(user_id, f"🙍🏻‍♂️{nickname}  {brief}", log, True)
+                results.append(f"🙍🏻‍♂️{nickname}  {brief}")
             except Exception as e:
-                self.single_finished.emit(user_id, f"❌ {nickname} 签到失败: {str(e)}", False)
-                results.append(f"❌ {nickname}: 签到失败 - {str(e)}")
+                self.single_finished.emit(user_id, f"❌{nickname} 签到失败", str(e), False)
+                results.append(f"❌{nickname} 签到失败")
 
-        summary = "\n\n".join(results)
+        summary = "\n".join(results)
         self.all_finished.emit(summary)
 
 
@@ -979,9 +995,9 @@ class MainWindow(QMainWindow):
             }
         """)
 
-        icon_path = os.path.join(DATA_DIR, "skikm-g8mg7-001.ico")
-        if os.path.exists(icon_path):
-            self.setWindowIcon(QIcon(icon_path))
+        if os.path.exists(ICON_PATH):
+            self.setWindowIcon(QIcon(ICON_PATH))
+            self._set_win32_icon(ICON_PATH)
 
         central = QWidget()
         self.setCentralWidget(central)
@@ -1112,9 +1128,8 @@ class MainWindow(QMainWindow):
         main_layout.addWidget(self.log_label)
 
     def init_tray(self):
-        icon_path = os.path.join(DATA_DIR, "skikm-g8mg7-001.ico")
-        if os.path.exists(icon_path):
-            tray_icon = QIcon(icon_path)
+        if os.path.exists(ICON_PATH):
+            tray_icon = QIcon(ICON_PATH)
         else:
             tray_icon = self.style().standardIcon(self.style().StandardPixmap.SP_ComputerIcon)
 
@@ -1162,6 +1177,21 @@ class MainWindow(QMainWindow):
         self.activateWindow()
         self.raise_()
 
+    def _set_win32_icon(self, icon_path):
+        WM_SETICON = 0x0080
+        ICON_SMALL = 0
+        ICON_BIG = 1
+        LR_LOADFROMFILE = 0x0010
+        IMAGE_ICON = 1
+
+        hwnd = int(self.winId())
+        small = ctypes.windll.user32.LoadImageW(0, icon_path, IMAGE_ICON, 16, 16, LR_LOADFROMFILE)
+        big = ctypes.windll.user32.LoadImageW(0, icon_path, IMAGE_ICON, 32, 32, LR_LOADFROMFILE)
+        if small:
+            ctypes.windll.user32.SendMessageW(hwnd, WM_SETICON, ICON_SMALL, small)
+        if big:
+            ctypes.windll.user32.SendMessageW(hwnd, WM_SETICON, ICON_BIG, big)
+
     def quit_app(self):
         self.tray.hide()
         QApplication.instance().quit()
@@ -1186,10 +1216,10 @@ class MainWindow(QMainWindow):
             key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, REGISTRY_PATH, 0, winreg.KEY_SET_VALUE)
             if enabled:
                 command = f'"{exe_path}"' if not exe_path.endswith('.py') else f'pythonw "{exe_path}"'
-                winreg.SetValueEx(key, APP_NAME, 0, winreg.REG_SZ, command)
+                winreg.SetValueEx(key, REGISTRY_KEY, 0, winreg.REG_SZ, command)
             else:
                 try:
-                    winreg.DeleteValue(key, APP_NAME)
+                    winreg.DeleteValue(key, REGISTRY_KEY)
                 except FileNotFoundError:
                     pass
             winreg.CloseKey(key)
@@ -1313,24 +1343,20 @@ class MainWindow(QMainWindow):
             self.batch_worker.all_finished.connect(self.on_batch_finished)
             self.batch_worker.start()
 
-    def on_sign_finished(self, user_id, message, success):
+    def on_sign_finished(self, user_id, message, detail, success):
         if user_id in self.user_cards:
             self.user_cards[user_id].update_status(self.data_manager.is_signed_today(user_id))
         self.update_user_count()
 
         if success:
-            self.log_label.setText(message.split('\n')[0] if '\n' in message else message)
-            if not self._is_batch_signing and '\n' in message:
-                lines = message.split('\n', 1)
-                title = lines[0].strip()
-                detail = lines[1].strip() if len(lines) > 1 else ""
-                if detail:
-                    dlg = ResultDialog(title, detail, self)
-                    dlg.exec()
+            self.log_label.setText(message)
+            if not self._is_batch_signing and detail:
+                dlg = ResultDialog(message, detail, self)
+                dlg.exec()
         else:
             self.log_label.setText(message)
             if not self._is_batch_signing:
-                dlg = ResultDialog("签到失败", message, self)
+                dlg = ResultDialog("签到失败", detail or message, self)
                 dlg.exec()
 
     def on_batch_finished(self, summary):
@@ -1342,6 +1368,8 @@ class MainWindow(QMainWindow):
         dlg.exec()
 
     def _startup_check(self):
+        self._calibrate_registry()
+
         if not self.data_manager.users:
             self.log_label.setText("👋 欢迎使用，请先添加用户")
             self._schedule_next_sign()
@@ -1354,6 +1382,30 @@ class MainWindow(QMainWindow):
             self._do_check_and_sign()
         else:
             self._do_check_and_sign()
+
+    def _calibrate_registry(self):
+        if not self.data_manager.settings.get("auto_start", False):
+            return
+        exe_path = sys.executable if getattr(sys, 'frozen', False) else os.path.abspath(__file__)
+        expected_cmd = f'"{exe_path}"' if not exe_path.endswith('.py') else f'pythonw "{exe_path}"'
+        try:
+            key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, REGISTRY_PATH, 0, winreg.KEY_READ)
+            try:
+                current_cmd, _ = winreg.QueryValueEx(key, REGISTRY_KEY)
+            except FileNotFoundError:
+                current_cmd = None
+            winreg.CloseKey(key)
+
+            if current_cmd != expected_cmd:
+                key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, REGISTRY_PATH, 0, winreg.KEY_SET_VALUE)
+                winreg.SetValueEx(key, REGISTRY_KEY, 0, winreg.REG_SZ, expected_cmd)
+                winreg.CloseKey(key)
+        except FileNotFoundError:
+            key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, REGISTRY_PATH, 0, winreg.KEY_SET_VALUE)
+            winreg.SetValueEx(key, REGISTRY_KEY, 0, winreg.REG_SZ, expected_cmd)
+            winreg.CloseKey(key)
+        except Exception:
+            pass
 
     def check_and_sign(self):
         self._do_check_and_sign()
@@ -1403,6 +1455,8 @@ class MainWindow(QMainWindow):
 
 
 def main():
+    ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("QuarkAutoCheckIn")
+
     mutex = ctypes.windll.kernel32.CreateMutexW(None, False, "Global\\QuarkAutoCheckIn_Mutex")
     if ctypes.windll.kernel32.GetLastError() == 183:
         ctypes.windll.user32.MessageBoxW(None, "程序已在运行中，请检查系统托盘。", "夸克网盘签到助手", 0x40)
