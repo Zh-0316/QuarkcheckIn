@@ -1,0 +1,12 @@
+__pycache__/
+*.pyc
+*.pyo
+*.exe
+*.spec
+build/
+dist/
+*.egg-info/
+
+users.json
+sign_records.json
+settings.json
