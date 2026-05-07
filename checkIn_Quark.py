@@ -31,6 +31,7 @@ import sys
 import winreg
 import ctypes
 import ctypes.wintypes
+import threading
 from datetime import datetime, timedelta
 
 import requests
@@ -101,6 +102,7 @@ class PowerBroadcastFilter(QAbstractNativeEventFilter):
 
 class DataManager:
     def __init__(self):
+        self._lock = threading.Lock()
         self.users = []
         self.sign_records = {}
         self.settings = {"auto_start": False, "auto_sign_on_start": True}
@@ -169,13 +171,15 @@ class DataManager:
 
     def is_signed_today(self, user_id):
         today = datetime.now().strftime("%Y-%m-%d")
-        record = self.sign_records.get(user_id, "")
-        return record == today
+        with self._lock:
+            record = self.sign_records.get(user_id, "")
+            return record == today
 
     def mark_signed(self, user_id):
         today = datetime.now().strftime("%Y-%m-%d")
-        self.sign_records[user_id] = today
-        self.save_records()
+        with self._lock:
+            self.sign_records[user_id] = today
+            self.save_records()
 
     def get_unsigned_users(self):
         return [u for u in self.users if not self.is_signed_today(u["id"])]
@@ -230,8 +234,9 @@ class Quark:
         data = {"sign_cyclic": True}
         try:
             response = requests.post(url=url, json=data, params=querystring, timeout=15).json()
-            if response.get("data"):
-                return True, response["data"]["sign_daily_reward"]
+            resp_data = response.get("data")
+            if resp_data:
+                return True, resp_data.get("sign_daily_reward", 0)
             else:
                 return False, response.get("message", "未知错误")
         except Exception as e:
@@ -240,50 +245,62 @@ class Quark:
     def do_sign(self):
         log = ""
         brief = ""
+        success = False
         growth_info = self.get_growth_info()
         if growth_info:
+            cap_sign = growth_info.get("cap_sign", {})
+            cap_comp = growth_info.get("cap_composition", {})
+            total_capacity = growth_info.get("total_capacity", 0)
+            is_vip = growth_info.get("88VIP", False)
+
             log += (
-                f" {'88VIP' if growth_info['88VIP'] else '普通用户'} {self.param.get('user', '未知')}\n"
-                f"💾 网盘总容量：{self.convert_bytes(growth_info['total_capacity'])}，"
+                f" {'88VIP' if is_vip else '普通用户'} {self.param.get('user', '未知')}\n"
+                f"💾 网盘总容量：{self.convert_bytes(total_capacity)}，"
                 f"签到累计容量：")
-            if "sign_reward" in growth_info['cap_composition']:
-                log += f"{self.convert_bytes(growth_info['cap_composition']['sign_reward'])}\n"
+            if "sign_reward" in cap_comp:
+                log += f"{self.convert_bytes(cap_comp['sign_reward'])}\n"
             else:
                 log += "0 MB\n"
 
-            if growth_info["cap_sign"]["sign_daily"]:
+            if cap_sign.get("sign_daily"):
+                sign_daily_reward = cap_sign.get("sign_daily_reward", 0)
+                sign_progress = cap_sign.get("sign_progress", 0)
+                sign_target = cap_sign.get("sign_target", 0)
                 log += (
-                    f"✅ 签到日志: 今日已签到+{self.convert_bytes(growth_info['cap_sign']['sign_daily_reward'])}，"
-                    f"连签进度({growth_info['cap_sign']['sign_progress']}/{growth_info['cap_sign']['sign_target']})\n"
+                    f"✅ 签到日志: 今日已签到+{self.convert_bytes(sign_daily_reward)}，"
+                    f"连签进度({sign_progress}/{sign_target})\n"
                 )
                 updated_growth_info = self.get_growth_info()
                 if updated_growth_info:
+                    updated_comp = updated_growth_info.get("cap_composition", {})
+                    updated_total = updated_growth_info.get("total_capacity", 0)
                     log += (
-                        f"📊 当前总容量：{self.convert_bytes(updated_growth_info['total_capacity'])}，"
-                        f"签到累计容量：{self.convert_bytes(updated_growth_info['cap_composition'].get('sign_reward', 0))}\n"
+                        f"📊 当前总容量：{self.convert_bytes(updated_total)}，"
+                        f"签到累计容量：{self.convert_bytes(updated_comp.get('sign_reward', 0))}\n"
                     )
-                    sign_reward = growth_info['cap_sign']['sign_daily_reward']
-                    total_sign = updated_growth_info['cap_composition'].get('sign_reward', 0)
-                    total_cap = updated_growth_info['total_capacity']
-                    progress = f"{growth_info['cap_sign']['sign_progress']}/{growth_info['cap_sign']['sign_target']}"
-                    brief = f"今日+{self.convert_bytes(sign_reward)}\n累计+{self.convert_bytes(total_sign)}  总空间{self.convert_bytes(total_cap)}  连签{progress}"
+                    total_sign = updated_comp.get("sign_reward", 0)
+                    brief = f"今日+{self.convert_bytes(sign_daily_reward)}\n累计+{self.convert_bytes(total_sign)}  总空间{self.convert_bytes(updated_total)}  连签{sign_progress}/{sign_target}"
+                success = True
             else:
                 sign, sign_return = self.get_growth_sign()
                 if sign:
+                    sign_progress = cap_sign.get("sign_progress", 0) + 1
+                    sign_target = cap_sign.get("sign_target", 0)
                     log += (
                         f"✅ 执行签到: 今日签到+{self.convert_bytes(sign_return)}，"
-                        f"连签进度({growth_info['cap_sign']['sign_progress'] + 1}/{growth_info['cap_sign']['sign_target']})\n"
+                        f"连签进度({sign_progress}/{sign_target})\n"
                     )
                     updated_growth_info = self.get_growth_info()
                     if updated_growth_info:
+                        updated_comp = updated_growth_info.get("cap_composition", {})
+                        updated_total = updated_growth_info.get("total_capacity", 0)
                         log += (
-                            f"📊 当前总容量：{self.convert_bytes(updated_growth_info['total_capacity'])}，"
-                            f"签到累计容量：{self.convert_bytes(updated_growth_info['cap_composition'].get('sign_reward', 0))}\n"
+                            f"📊 当前总容量：{self.convert_bytes(updated_total)}，"
+                            f"签到累计容量：{self.convert_bytes(updated_comp.get('sign_reward', 0))}\n"
                         )
-                        total_sign = updated_growth_info['cap_composition'].get('sign_reward', 0)
-                        total_cap = updated_growth_info['total_capacity']
-                        progress = f"{growth_info['cap_sign']['sign_progress'] + 1}/{growth_info['cap_sign']['sign_target']}"
-                        brief = f"今日+{self.convert_bytes(sign_return)}\n累计+{self.convert_bytes(total_sign)}  总空间{self.convert_bytes(total_cap)}  连签{progress}"
+                        total_sign = updated_comp.get("sign_reward", 0)
+                        brief = f"今日+{self.convert_bytes(sign_return)}\n累计+{self.convert_bytes(total_sign)}  总空间{self.convert_bytes(updated_total)}  连签{sign_progress}/{sign_target}"
+                    success = True
                 else:
                     log += f"❌ 签到异常: {sign_return}\n"
                     brief = f"❌ {sign_return}"
@@ -291,7 +308,10 @@ class Quark:
             log += "❌ 签到异常: 获取成长信息失败\n"
             brief = "❌ 获取成长信息失败"
 
-        return log, brief
+        if success and not brief:
+            brief = "✅ 签到成功"
+
+        return log, brief, success
 
 
 class SignWorker(QThread):
@@ -317,9 +337,12 @@ class SignWorker(QThread):
 
         try:
             quark = Quark(user_data)
-            log, brief = quark.do_sign()
-            self.data_manager.mark_signed(user_id)
-            self.finished.emit(user_id, f"🙍🏻‍♂️{nickname}  {brief}", log, True)
+            log, brief, sign_ok = quark.do_sign()
+            if sign_ok:
+                self.data_manager.mark_signed(user_id)
+                self.finished.emit(user_id, f"🙍🏻‍♂️{nickname}  {brief}", log, True)
+            else:
+                self.finished.emit(user_id, f"❌{nickname}  {brief}", log, False)
         except Exception as e:
             self.finished.emit(user_id, f"❌{nickname} 签到失败", str(e), False)
 
@@ -351,10 +374,14 @@ class BatchSignWorker(QThread):
 
             try:
                 quark = Quark(user_data)
-                log, brief = quark.do_sign()
-                self.data_manager.mark_signed(user_id)
-                self.single_finished.emit(user_id, f"🙍🏻‍♂️{nickname}  {brief}", log, True)
-                results.append(f"🙍🏻‍♂️{nickname}  {brief}")
+                log, brief, sign_ok = quark.do_sign()
+                if sign_ok:
+                    self.data_manager.mark_signed(user_id)
+                    self.single_finished.emit(user_id, f"🙍🏻‍♂️{nickname}  {brief}", log, True)
+                    results.append(f"🙍🏻‍♂️{nickname}  {brief}")
+                else:
+                    self.single_finished.emit(user_id, f"❌{nickname}  {brief}", log, False)
+                    results.append(f"❌{nickname}  {brief}")
             except Exception as e:
                 self.single_finished.emit(user_id, f"❌{nickname} 签到失败", str(e), False)
                 results.append(f"❌{nickname} 签到失败")
@@ -1188,9 +1215,13 @@ class MainWindow(QMainWindow):
         small = ctypes.windll.user32.LoadImageW(0, icon_path, IMAGE_ICON, 16, 16, LR_LOADFROMFILE)
         big = ctypes.windll.user32.LoadImageW(0, icon_path, IMAGE_ICON, 32, 32, LR_LOADFROMFILE)
         if small:
-            ctypes.windll.user32.SendMessageW(hwnd, WM_SETICON, ICON_SMALL, small)
+            old = ctypes.windll.user32.SendMessageW(hwnd, WM_SETICON, ICON_SMALL, small)
+            if old:
+                ctypes.windll.user32.DestroyIcon(old)
         if big:
-            ctypes.windll.user32.SendMessageW(hwnd, WM_SETICON, ICON_BIG, big)
+            old = ctypes.windll.user32.SendMessageW(hwnd, WM_SETICON, ICON_BIG, big)
+            if old:
+                ctypes.windll.user32.DestroyIcon(old)
 
     def quit_app(self):
         self.tray.hide()
@@ -1290,6 +1321,10 @@ class MainWindow(QMainWindow):
             self.log_label.setText(f"🗑️ 已删除用户：{user['nickname']}")
 
     def sign_single_user(self, user_id):
+        if self._is_batch_signing:
+            self.log_label.setText("⚠️ 批量签到进行中，请稍候")
+            return
+
         user = next((u for u in self.data_manager.users if u["id"] == user_id), None)
         if not user:
             return
@@ -1305,6 +1340,10 @@ class MainWindow(QMainWindow):
         worker.start()
 
     def sign_all(self):
+        if self._is_batch_signing:
+            self.log_label.setText("⚠️ 批量签到进行中，请稍候")
+            return
+
         if not self.data_manager.users:
             self.log_label.setText("⚠️ 请先添加用户")
             QMessageBox.information(self, "提示", "还没有添加用户，请先点击「添加用户」按钮添加。")
@@ -1324,6 +1363,10 @@ class MainWindow(QMainWindow):
         self.batch_worker.start()
 
     def sign_selected(self):
+        if self._is_batch_signing:
+            self.log_label.setText("⚠️ 批量签到进行中，请稍候")
+            return
+
         if not self.data_manager.users:
             self.log_label.setText("⚠️ 请先添加用户")
             QMessageBox.information(self, "提示", "还没有添加用户，请先点击「添加用户」按钮添加。")
@@ -1344,6 +1387,8 @@ class MainWindow(QMainWindow):
             self.batch_worker.start()
 
     def on_sign_finished(self, user_id, message, detail, success):
+        self.sign_workers = [w for w in self.sign_workers if w.isRunning()]
+
         if user_id in self.user_cards:
             self.user_cards[user_id].update_status(self.data_manager.is_signed_today(user_id))
         self.update_user_count()
@@ -1361,6 +1406,7 @@ class MainWindow(QMainWindow):
 
     def on_batch_finished(self, summary):
         self._is_batch_signing = False
+        self.batch_worker = None
         self._schedule_next_sign()
         self.log_label.setText("✅ 批量签到完成")
         self.tray.showMessage("夸克网盘签到助手", summary, QSystemTrayIcon.MessageIcon.Information, 5000)
@@ -1375,13 +1421,7 @@ class MainWindow(QMainWindow):
             self._schedule_next_sign()
             return
 
-        saved_target = self.data_manager.get_next_sign_target()
-        now_ts = int(datetime.now().timestamp() * 1000)
-        if saved_target and now_ts > saved_target:
-            self.log_label.setText("⏳ 启动检查：发现过期未签到，立即执行...")
-            self._do_check_and_sign()
-        else:
-            self._do_check_and_sign()
+        self._do_check_and_sign()
 
     def _calibrate_registry(self):
         if not self.data_manager.settings.get("auto_start", False):
@@ -1411,6 +1451,9 @@ class MainWindow(QMainWindow):
         self._do_check_and_sign()
 
     def _do_check_and_sign(self):
+        if self._is_batch_signing:
+            return
+
         if not self.data_manager.users:
             self.log_label.setText("👋 请先添加用户")
             self._schedule_next_sign()
@@ -1430,6 +1473,7 @@ class MainWindow(QMainWindow):
 
     def _on_auto_batch_finished(self, summary):
         self._is_batch_signing = False
+        self.batch_worker = None
         self._schedule_next_sign()
         self.log_label.setText("✅ 自动签到完成")
         self.tray.showMessage("夸克网盘签到助手", summary, QSystemTrayIcon.MessageIcon.Information, 5000)
@@ -1442,6 +1486,8 @@ class MainWindow(QMainWindow):
 
     def _safety_check(self):
         if not self.data_manager.users:
+            return
+        if self._is_batch_signing:
             return
         if not self._precise_timer.isActive():
             self._schedule_next_sign()
