@@ -1,30 +1,21 @@
 '''
-new Env('夸克自动签到')
-cron: 0 9 * * *
+夸克网盘自动签到 - Windows 图形化版
+本程序实现夸克网盘每日自动签到，签到可获得网盘容量奖励。
+不需要账号密码登录：复用手机端抓包链接里的 kps/sign/vcode 三个鉴权参数，
+程序携带它们请求官方的查询(info)和签到(sign)接口，奖励由服务端自动入账。
+参数有时效，失效后重新抓包更新即可；支持多账号，每个账号单独抓取一条链接。
 
-V2版-目前有效
-使用移动端接口修复每日自动签到，移除原有的"登录验证"，参数有效期未知
-
-V1版-已失效
-受大佬 @Cp0204 的仓库项目启发改编
-源码来自 GitHub 仓库：https://github.com/Cp0204/quark-auto-save
-提取"登录验证""签到""领取"方法封装到下文中的"Quark"类中
-
-Author: BNDou
-Date: 2024-03-15 21:43:06
-LastEditTime: 2025-11-18 03:49:26
-FilePath: /Auto_Check_In/checkIn_Quark.py
-Description: 
 抓包流程：
     【手机端】
-    ①打开抓包，手机端访问抽奖页
-    ②找到url为 https://drive-m.quark.cn/1/clouddrive/act/growth/reward 的请求信息
-    ③复制整段url，该链接后面必须要有参数: kps sign vcode，粘贴到环境变量
-    环境变量名为 COOKIE_QUARK 多账户用 回车 或 && 分开
-    user字段是用户名 (可是随意填写，多账户方便区分)
-    例如: user=张三; url=https://drive-m.quark.cn/1/clouddrive/act/growth/reward?xxxxxx=xxxxxx&kps=abcdefg&sign=hijklmn&vcode=111111111;
-    旧版环境变量格式也兼容，例如: user=张三; kps=abcdefg; sign=hijklmn; vcode=111111111;
+    ①打开抓包软件，手机端访问网盘签到界面（进入签到页即会自动签到）
+    ②找到url为 https://drive-member.quark.cn/1/clouddrive/capacity/growth 的请求信息
+    ③复制整段url，该链接后面必须要有的参数: kps sign vcode，粘贴到程序「添加用户」中
+
+Author: Zh
+源码改编自 [@BNDou](https://github.com/BNDou/Auto_Check_In) 的脚本
 '''
+
+
 import json
 import os
 import sys
@@ -206,7 +197,7 @@ class Quark:
         return f"{b:.2f} {units[i]}"
 
     def get_growth_info(self):
-        url = "https://drive-m.quark.cn/1/clouddrive/capacity/growth/info"
+        url = "https://drive-member.quark.cn/1/clouddrive/capacity/growth/info"
         querystring = {
             "pr": "ucpro",
             "fr": "android",
@@ -223,7 +214,7 @@ class Quark:
         return False
 
     def get_growth_sign(self):
-        url = "https://drive-m.quark.cn/1/clouddrive/capacity/growth/sign"
+        url = "https://drive-member.quark.cn/1/clouddrive/capacity/growth/sign"
         querystring = {
             "pr": "ucpro",
             "fr": "android",
@@ -243,73 +234,68 @@ class Quark:
             return False, str(e)
 
     def do_sign(self):
-        log = ""
-        brief = ""
-        success = False
         growth_info = self.get_growth_info()
-        if growth_info:
-            cap_sign = growth_info.get("cap_sign", {})
-            cap_comp = growth_info.get("cap_composition", {})
-            total_capacity = growth_info.get("total_capacity", 0)
-            is_vip = growth_info.get("88VIP", False)
+        if not growth_info:
+            log = (f"  {self.param.get('user', '未知')}\n"
+                   f"  获取成长信息失败: kps/sign/vcode 可能已过期，请重新抓包更新\n")
+            return log, "获取成长信息失败，参数可能已过期", False
 
+        cap_sign = growth_info.get("cap_sign", {})
+        cap_comp = growth_info.get("cap_composition", {})
+        sign_reward = cap_comp.get("sign_reward", 0)
+        total_capacity = growth_info.get("total_capacity", 0)
+        is_vip = growth_info.get("88VIP", False)
+        total_days = growth_info.get("cap_growth", {}).get("cur_total_sign_day", 0)
+
+        log = (
+            f"  {self.param.get('user', '未知')} ({'88VIP' if is_vip else '普通用户'})\n"
+            f"  账号信息: 总容量 {self.convert_bytes(total_capacity)}"
+            f" | 签到累计容量 {self.convert_bytes(sign_reward)}\n"
+        )
+
+        if cap_sign.get("sign_daily"):
+            sign_daily_reward = cap_sign.get("sign_daily_reward", 0)
+            sign_progress = cap_sign.get("sign_progress", 0)
+            sign_target = cap_sign.get("sign_target", 0)
             log += (
-                f" {'88VIP' if is_vip else '普通用户'} {self.param.get('user', '未知')}\n"
-                f"💾 网盘总容量：{self.convert_bytes(total_capacity)}，"
-                f"签到累计容量：")
-            if "sign_reward" in cap_comp:
-                log += f"{self.convert_bytes(cap_comp['sign_reward'])}\n"
-            else:
-                log += "0 MB\n"
-
-            if cap_sign.get("sign_daily"):
-                sign_daily_reward = cap_sign.get("sign_daily_reward", 0)
-                sign_progress = cap_sign.get("sign_progress", 0)
-                sign_target = cap_sign.get("sign_target", 0)
-                log += (
-                    f"✅ 签到日志: 今日已签到+{self.convert_bytes(sign_daily_reward)}，"
-                    f"连签进度({sign_progress}/{sign_target})\n"
-                )
-                updated_growth_info = self.get_growth_info()
-                if updated_growth_info:
-                    updated_comp = updated_growth_info.get("cap_composition", {})
-                    updated_total = updated_growth_info.get("total_capacity", 0)
-                    log += (
-                        f"📊 当前总容量：{self.convert_bytes(updated_total)}，"
-                        f"签到累计容量：{self.convert_bytes(updated_comp.get('sign_reward', 0))}\n"
-                    )
-                    total_sign = updated_comp.get("sign_reward", 0)
-                    brief = f"今日+{self.convert_bytes(sign_daily_reward)}\n累计+{self.convert_bytes(total_sign)}  总空间{self.convert_bytes(updated_total)}  连签{sign_progress}/{sign_target}"
-                success = True
-            else:
-                sign, sign_return = self.get_growth_sign()
-                if sign:
-                    sign_progress = cap_sign.get("sign_progress", 0) + 1
-                    sign_target = cap_sign.get("sign_target", 0)
-                    log += (
-                        f"✅ 执行签到: 今日签到+{self.convert_bytes(sign_return)}，"
-                        f"连签进度({sign_progress}/{sign_target})\n"
-                    )
-                    updated_growth_info = self.get_growth_info()
-                    if updated_growth_info:
-                        updated_comp = updated_growth_info.get("cap_composition", {})
-                        updated_total = updated_growth_info.get("total_capacity", 0)
-                        log += (
-                            f"📊 当前总容量：{self.convert_bytes(updated_total)}，"
-                            f"签到累计容量：{self.convert_bytes(updated_comp.get('sign_reward', 0))}\n"
-                        )
-                        total_sign = updated_comp.get("sign_reward", 0)
-                        brief = f"今日+{self.convert_bytes(sign_return)}\n累计+{self.convert_bytes(total_sign)}  总空间{self.convert_bytes(updated_total)}  连签{sign_progress}/{sign_target}"
-                    success = True
-                else:
-                    log += f"❌ 签到异常: {sign_return}\n"
-                    brief = f"❌ {sign_return}"
+                f"  今日已签到 +{self.convert_bytes(sign_daily_reward)}"
+                f" | 连签进度({sign_progress}/{sign_target})"
+                f" | 累计签到{total_days}天\n"
+                f"  当前总容量 {self.convert_bytes(total_capacity)}"
+                f" | 签到累计容量 {self.convert_bytes(sign_reward)}\n"
+            )
+            brief = (f"今日+{self.convert_bytes(sign_daily_reward)}"
+                     f" | 连签{sign_progress}/{sign_target}"
+                     f" | 累计{total_days}天\n"
+                     f"总空间 {self.convert_bytes(total_capacity)}"
+                     f" | 签到累计 {self.convert_bytes(sign_reward)}")
+            success = True
         else:
-            log += "❌ 签到异常: 获取成长信息失败\n"
-            brief = "❌ 获取成长信息失败"
-
-        if success and not brief:
-            brief = "✅ 签到成功"
+            sign, sign_return = self.get_growth_sign()
+            if not sign:
+                log += f"  签到失败: {sign_return}\n"
+                return log, f"签到失败: {sign_return}", False
+            sign_progress = cap_sign.get("sign_progress", 0) + 1
+            sign_target = cap_sign.get("sign_target", 0)
+            log += (
+                f"  签到成功 +{self.convert_bytes(sign_return)}"
+                f" | 连签进度({sign_progress}/{sign_target})"
+                f" | 累计签到{total_days + 1}天\n"
+            )
+            updated_info = self.get_growth_info() or growth_info
+            updated_comp = updated_info.get("cap_composition", {})
+            updated_sign_reward = updated_comp.get("sign_reward", 0)
+            updated_total = updated_info.get("total_capacity", 0)
+            log += (
+                f"  当前总容量 {self.convert_bytes(updated_total)}"
+                f" | 签到累计容量 {self.convert_bytes(updated_sign_reward)}\n"
+            )
+            brief = (f"今日+{self.convert_bytes(sign_return)}"
+                     f" | 连签{sign_progress}/{sign_target}"
+                     f" | 累计{total_days + 1}天\n"
+                     f"总空间 {self.convert_bytes(updated_total)}"
+                     f" | 签到累计 {self.convert_bytes(updated_sign_reward)}")
+            success = True
 
         return log, brief, success
 
@@ -340,11 +326,11 @@ class SignWorker(QThread):
             log, brief, sign_ok = quark.do_sign()
             if sign_ok:
                 self.data_manager.mark_signed(user_id)
-                self.finished.emit(user_id, f"🙍🏻‍♂️{nickname}  {brief}", log, True)
+                self.finished.emit(user_id, f"✅ {nickname}  {brief}", log, True)
             else:
-                self.finished.emit(user_id, f"❌{nickname}  {brief}", log, False)
+                self.finished.emit(user_id, f"❌ {nickname}  {brief}", log, False)
         except Exception as e:
-            self.finished.emit(user_id, f"❌{nickname} 签到失败", str(e), False)
+            self.finished.emit(user_id, f"❌ {nickname} 签到失败", str(e), False)
 
 
 class BatchSignWorker(QThread):
@@ -377,14 +363,14 @@ class BatchSignWorker(QThread):
                 log, brief, sign_ok = quark.do_sign()
                 if sign_ok:
                     self.data_manager.mark_signed(user_id)
-                    self.single_finished.emit(user_id, f"🙍🏻‍♂️{nickname}  {brief}", log, True)
-                    results.append(f"🙍🏻‍♂️{nickname}  {brief}")
+                    self.single_finished.emit(user_id, f"✅ {nickname}  {brief}", log, True)
+                    results.append(f"✅ {nickname}  {brief}")
                 else:
-                    self.single_finished.emit(user_id, f"❌{nickname}  {brief}", log, False)
-                    results.append(f"❌{nickname}  {brief}")
+                    self.single_finished.emit(user_id, f"❌ {nickname}  {brief}", log, False)
+                    results.append(f"❌ {nickname}  {brief}")
             except Exception as e:
-                self.single_finished.emit(user_id, f"❌{nickname} 签到失败", str(e), False)
-                results.append(f"❌{nickname} 签到失败")
+                self.single_finished.emit(user_id, f"❌ {nickname} 签到失败", str(e), False)
+                results.append(f"❌ {nickname} 签到失败")
 
         summary = "\n".join(results)
         self.all_finished.emit(summary)
@@ -1290,16 +1276,16 @@ class MainWindow(QMainWindow):
 
     def show_help(self):
         help_text = (
-            "【手机端抓包步骤】\n\n"
-            "1. 在手机上安装抓包工具（如 HttpCanary、Stream 等）\n\n"
-            "2. 打开抓包工具，开始抓包\n\n"
-            "3. 打开夸克网盘 APP，进入签到页面\n\n"
-            "4. 在抓包工具中找到 URL 为：\n"
-            "   https://drive-m.quark.cn/1/clouddrive/act/growth/reward\n\n"
-            "5. 复制该请求的完整 URL（必须包含 kps、sign、vcode 三个参数）\n\n"
-            "6. 回到本程序，点击「添加用户」，粘贴 URL 即可\n\n"
+            "【手机端抓包步骤】\n"
+            "1. 在手机上安装抓包工具（如 Reqable 等）\n"
+            "2. 打开抓包工具，开始抓包\n"
+            "3. 打开夸克网盘 APP，进入签到页面\n"
+            "4. 在抓包工具中找到 URL 类似下面的请求：\n"
+            "   https://drive-member.quark.cn/1/clouddrive/capacity/growth/info\n"
+            "5. 复制该请求的完整 URL\n"
+            "6. 回到本程序，点击「添加用户」，粘贴 URL 即可\n"
             "【注意事项】\n"
-            "• URL 有效期未知，失效后需要重新抓包\n"
+            "• kps/sign/vcode 有时效，失效后需重新抓包更新\n"
             "• 多个账户需要分别抓包获取各自的 URL"
         )
         dlg = ResultDialog("📋 抓包说明", help_text, self)
