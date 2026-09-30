@@ -413,8 +413,8 @@ class ResultDialog(QDialog):
     def __init__(self, title, content, parent=None):
         super().__init__(parent)
         self.setWindowTitle(title)
-        self.setMinimumSize(460, 300)
-        self.resize(500, 400)
+        self.setMinimumSize(380, 220)
+        self.resize(460, 340)
         self.setStyleSheet("""
             QDialog {
                 background-color: #1e1e2e;
@@ -471,8 +471,8 @@ class ResultDialog(QDialog):
 
         content_label = QLabel(content)
         content_label.setStyleSheet(
-            "color: #bac2de; font-size: 12px; "
-            "background-color: #313244; border-radius: 8px; padding: 12px;"
+            "color: #bac2de; font-size: 14px; "
+            "background-color: #313244; border-radius: 8px; padding: 14px;"
         )
         content_label.setWordWrap(True)
         content_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
@@ -1232,7 +1232,7 @@ class MainWindow(QMainWindow):
         try:
             key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, REGISTRY_PATH, 0, winreg.KEY_SET_VALUE)
             if enabled:
-                command = f'"{exe_path}"' if not exe_path.endswith('.py') else f'pythonw "{exe_path}"'
+                command = f'"{exe_path}" --bg' if not exe_path.endswith('.py') else f'pythonw "{exe_path}" --bg'
                 winreg.SetValueEx(key, REGISTRY_KEY, 0, winreg.REG_SZ, command)
             else:
                 try:
@@ -1282,11 +1282,12 @@ class MainWindow(QMainWindow):
             "3. 打开夸克网盘 APP，进入签到页面\n"
             "4. 在抓包工具中找到 URL 类似下面的请求：\n"
             "   https://drive-member.quark.cn/1/clouddrive/capacity/growth/info\n"
-            "5. 复制该请求的完整 URL\n"
+            "5. 复制该请求的完整 URL（必须包含 kps、sign、vcode 三个参数）\n"
             "6. 回到本程序，点击「添加用户」，粘贴 URL 即可\n"
             "【注意事项】\n"
             "• kps/sign/vcode 有时效，失效后需重新抓包更新\n"
-            "• 多个账户需要分别抓包获取各自的 URL"
+            "• 多个账户需要分别抓包获取各自的 URL\n"
+            "• 换账号时删除旧用户、添加新用户即可，无需其他配置"
         )
         dlg = ResultDialog("📋 抓包说明", help_text, self)
         dlg.exec()
@@ -1382,7 +1383,7 @@ class MainWindow(QMainWindow):
         if success:
             self.log_label.setText(message)
             if not self._is_batch_signing and detail:
-                dlg = ResultDialog(message, detail, self)
+                dlg = ResultDialog("签到结果", detail, self)
                 dlg.exec()
         else:
             self.log_label.setText(message)
@@ -1413,7 +1414,7 @@ class MainWindow(QMainWindow):
         if not self.data_manager.settings.get("auto_start", False):
             return
         exe_path = sys.executable if getattr(sys, 'frozen', False) else os.path.abspath(__file__)
-        expected_cmd = f'"{exe_path}"' if not exe_path.endswith('.py') else f'pythonw "{exe_path}"'
+        expected_cmd = f'"{exe_path}" --bg' if not exe_path.endswith('.py') else f'pythonw "{exe_path}" --bg'
         try:
             key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, REGISTRY_PATH, 0, winreg.KEY_READ)
             try:
@@ -1517,7 +1518,8 @@ def main():
     """)
 
     window = MainWindow()
-    window.show()
+    if "--bg" not in sys.argv:
+        window.show()
 
     sys.exit(app.exec())
 
