@@ -60,6 +60,29 @@ pyinstaller --onefile --windowed --name "QuarkCheckIn" --icon "icon.ico" --add-d
 - 多个账户需要分别抓包获取各自的 URL
 - 换账号时删除旧用户、添加新用户即可，无需其他配置
 
+## Docker / NAS 版
+
+除 GUI 版外，本仓库 `docker/` 目录另提供一个**无界面**的 Docker 版：用环境变量配置账号、容器内置 cron 每天自动签到，适合 NAS / 服务器 7×24 常驻。抓包取参数的方式与上文完全相同。
+
+直接拉镜像运行：
+
+```bash
+docker run -d --name quark-checkin \
+  -e TZ=Asia/Shanghai \
+  -e CRON_SCHEDULE="0 9 * * *" \
+  -e COOKIE_QUARK="user=张三; url=抓包链接整段粘贴;" \
+  --restart unless-stopped \
+  ghcr.io/zh-0316/quark-checkin:latest
+```
+
+- 多账号：`COOKIE_QUARK` 用换行或 `&&` 分隔多段 `user=..; url=..;`
+- 定时：`CRON_SCHEDULE` 为 cron 表达式，默认每天 09:00；签到接口幂等，一天跑多次不会重复签，可设 `0 */6 * * *` 多次兜底防漏签
+- 手动补签：`docker exec quark-checkin python /app/checkIn_Quark.py`
+- 也可克隆后用 `docker/docker-compose.yml`：`docker compose up -d --build`
+- 参数过期时重新抓包替换 `COOKIE_QUARK` 并 `docker compose up -d --force-recreate`
+
+镜像为多架构（`linux/amd64` + `linux/arm64`），x86 主机与 ARM 群晖 / 威联通 NAS 通用。
+
 ## 项目结构
 
 ```
