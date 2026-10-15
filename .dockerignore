@@ -1,9 +1,0 @@
-# 构建镜像时忽略的文件（不影响 build，只减小上下文、加快构建）
-.git
-.gitignore
-.github
-__pycache__/
-*.pyc
-*.pyo
-*.md
-docker-compose.yml
