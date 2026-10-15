@@ -1,0 +1,68 @@
+name: Build and Publish Docker Image
+
+# 方案 B：本工作流放仓库根 .github/workflows/，Docker 文件放仓库 docker/ 子目录
+# 触发：
+#   1) main 分支 push 且改动涉及 docker/ 或本文件 -> 构建并推 latest
+#   2) 推送 v 开头的 tag（如 v1.0.0）-> 构建并推 latest + 版本号 + tag
+#   3) Actions 页面手动 Run workflow
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+    paths:
+      - "docker/**"
+      - ".github/workflows/docker-publish.yml"
+  workflow_dispatch:
+
+env:
+  # 最终镜像 = ghcr.io/<你的用户名>/<IMAGE_NAME>，例如 ghcr.io/zh-0316/quark-checkin
+  IMAGE_NAME: quark-checkin
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write   # 内置 GITHUB_TOKEN 推送到 ghcr.io
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # 让 buildx 能构建 arm64（群晖/威联通等 ARM NAS 需要）
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository_owner }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=ref,event=branch
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=raw,value=latest,enable={{is_default_branch}}
+            type=sha
+
+      - name: Build and push (multi-arch)
+        uses: docker/build-push-action@v6
+        with:
+          context: docker            # 仓库内的 docker/ 子目录
+          file: docker/Dockerfile
+          push: true
+          platforms: linux/amd64,linux/arm64
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
