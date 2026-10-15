@@ -92,7 +92,7 @@ checkIn_Quark/
 
 ## 许可证
 
-MIT License
+本项目基于 AGPL-3.0 协议开源，详见 [LICENSE](LICENSE)。
 
 ## 免责声明
 
