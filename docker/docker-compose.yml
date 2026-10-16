@@ -22,24 +22,22 @@ services:
       # ============================================================
       # COOKIE_QUARK - 夸克账号配置（必填，请修改为你的实际信息）
       # ============================================================
+      # 用户名随意填，只用于区分账号；url 填手机抓包得到的完整链接
       #
-      # 【单用户配置】把下面三个值替换为你自己抓包的信息（手机抓一条 growth 链接即可）
-      # 参数过期时：只需替换 kps= / sign= / vcode= 三个值，然后重建容器
+      # 【单用户】
       COOKIE_QUARK: "user=; url=;"
       #
+      # 【多用户】用 && 拼成一行
+      # COOKIE_QUARK: "user=账号A; url=https://drive-member.quark.cn/1/clouddrive/capacity/growth/info?kps=xxxA&sign=xxxA&vcode=xxxA;&&user=账号B; url=https://drive-member.quark.cn/1/clouddrive/capacity/growth/info?kps=xxxB&sign=xxxB&vcode=xxxB;"
       #
-      # 【多用户配置】（取消注释下面这段，替换掉上面单用户的配置）
-      # ⚠️ 多个账号用 && 或换行分隔，用户名随意填，用于区分不同账号
-      #
-      # COOKIE_QUARK: >-
+      # 【多用户】每行一个账号
+      # COOKIE_QUARK: |
       #   user=账号A; url=https://drive-member.quark.cn/1/clouddrive/capacity/growth/info?kps=xxxA&sign=xxxA&vcode=xxxA;
       #   user=账号B; url=https://drive-member.quark.cn/1/clouddrive/capacity/growth/info?kps=xxxB&sign=xxxB&vcode=xxxB;
-      #   user=账号C; url=https://drive-member.quark.cn/1/clouddrive/capacity/growth/info?kps=xxxC&sign=xxxC&vcode=xxxC;
-      #
-      # 💡 也可以一行搞定：user=账号A; url=...;&&user=账号B; url=...;
       #
       # ⚠️ 注意：
       # 1. url 必须包含 kps、sign、vcode 三个参数（手机抓包获取）
       # 2. 用户名可以是任意字符，多用户时用于区分
       # 3. 账号数量无限制
-      # 4. 抓包教程见 checkIn_Quark.py 文件头部注释
+      # 4. 改完本文件需重新部署容器才生效（docker restart 不会重新读取环境变量）
+      # 5. 抓包教程见 checkIn_Quark.py 文件头部注释
